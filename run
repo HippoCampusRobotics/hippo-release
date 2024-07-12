@@ -1,0 +1,3 @@
+#!/usr/bin/bash
+docker run --rm --ulimit nofiles=1024:2048 -v ./debs:/debs -v ./src:/src hippo-release-builder:latest "$@"
+
