@@ -1,0 +1,29 @@
+#!/usr/bin/bash
+
+set -e
+
+cd src
+
+declare -a pkgs=(
+    "acoustic_msgs"
+    "alpha_arm_msgs"
+    "buttons_msgs"
+    "dvl_msgs"
+    "gantry_msgs"
+    "hippo_control_msgs"
+    "hippo_msgs"
+    "rapid_trajectories_msgs"
+    "state_estimation_msgs"
+    "uvms_msgs"
+)
+
+for f in "${pkgs[@]}"
+do
+    echo "Cloning ${f}"
+    git clone --quiet https://github.com/hippocampusrobotics/${f}.git &> /dev/null
+    cd "${f}"
+    latest_tag=$(git describe --tags "$(git rev-list --tags --max-count=1)")
+    echo "Checking out ${f}: ${latest_tag}"
+    tmp=$(git checkout --quiet "${latest_tag}")
+    cd ..
+done

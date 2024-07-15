@@ -20,11 +20,13 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 ENV TERM=xterm-256color
 
-WORKDIR /ros2/src
+WORKDIR /ros2
 
+COPY ./src /ros2/src
+COPY ./scripts /scripts
 COPY ./entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-ENTRYPOINT ["/entrypoint.sh"]
-CMD [""]
+ENTRYPOINT ["python3",  "-u", "/scripts/build_everything.py"]
+CMD ["/bin/bash"]
 
