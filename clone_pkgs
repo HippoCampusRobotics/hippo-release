@@ -10,6 +10,8 @@ declare -a pkgs=(
     "hardware"
     "esc"
     "path_planning"
+    "mjpeg_cam"
+    "remote_control"
 )
 
 for f in "${pkgs[@]}"
