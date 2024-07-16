@@ -164,13 +164,18 @@ if __name__ == '__main__':
     pkgs = get_packages()
     # we do this only once. it is required because we are in a docker
     # environment and the sources list is deleted by convention
+    print('Updating apt')
     run_apt_update()
+    print('Updating rosdep')
     run_rosdep_update()
     for pkg in pkgs:
         print(f'\nProcessing {pkg.name}')
         if not pkg.requires_rebuild():
             continue
+        print('Installing dependencies.')
         install_dependencies(pkg)
         build_package(pkg)
+        print('Installing package')
         install_package(pkg)
+        print('Updating rosdep')
         run_rosdep_update()
