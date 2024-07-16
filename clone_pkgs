@@ -13,6 +13,7 @@ declare -a pkgs=(
     "mjpeg_cam"
     "remote_control"
     "dvl"
+    "hippo_common_msgs"
 )
 
 for f in "${pkgs[@]}"
