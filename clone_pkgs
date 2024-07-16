@@ -12,6 +12,7 @@ declare -a pkgs=(
     "path_planning"
     "mjpeg_cam"
     "remote_control"
+    "dvl"
 )
 
 for f in "${pkgs[@]}"
