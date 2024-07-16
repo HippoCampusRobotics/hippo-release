@@ -1,0 +1,25 @@
+#!/usr/bin/bash
+
+set -e
+
+cd src
+
+declare -a pkgs=(
+    "hippo_common"
+    "hippo_control"
+    "hardware"
+    "esc"
+    "path_planning"
+)
+
+for f in "${pkgs[@]}"
+do
+    echo "Cloning ${f}"
+    git clone --quiet https://github.com/hippocampusrobotics/${f}.git &> /dev/null
+    cd "${f}"
+    latest_tag=$(git describe --tags "$(git rev-list --tags --max-count=1)")
+    echo "Checking out ${f}: ${latest_tag}"
+    tmp=$(git checkout --quiet "${latest_tag}")
+    git submodule update --init --recursive --quiet
+    cd ..
+done

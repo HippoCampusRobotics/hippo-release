@@ -1,0 +1,6 @@
+#!/usr/bin/bash
+
+set -e
+
+rm -rf src/*
+rm -rf debs/*
