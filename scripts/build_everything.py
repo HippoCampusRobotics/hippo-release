@@ -3,9 +3,11 @@
 import glob
 import os
 import pathlib
+import re
 import shlex
 import shutil
 import subprocess
+import threading
 from collections import namedtuple
 
 import yaml
@@ -16,6 +18,74 @@ WORKSPACE_DIR = os.getcwd()
 DEBS = []
 
 
+class Version:
+    def __init__(self, version: str = None):
+        self.major = 0
+        self.minor = 0
+        self.patch = 0
+        if not version:
+            version = '0.0.0'
+        self.set_from_string(version)
+
+    def set_from_string(self, version: str):
+        try:
+            x = re.search(r'^([0-9]+)\.([0-9]+)\.([0-9]+)$', version)
+        except TypeError as e:
+            raise ValueError(
+                f'Could not parse version of pattern <n.n.n> in "{version}"'
+            ) from e
+        if not x:
+            raise ValueError(
+                f'Could not parse version of pattern <n.n.n> in "{version}"'
+            )
+        self.major = int(x.group(1))
+        self.minor = int(x.group(2))
+        self.patch = int(x.group(3))
+
+    def __repr__(self):
+        return f"Version('{self.major}.{self.minor}.{self.patch}')"
+
+    def __str__(self):
+        return f'{self.major}.{self.minor}.{self.patch}'
+
+    def __eq__(self, other):
+        return (
+            (self.major == other.major)
+            and (self.minor == other.minor)
+            and (self.patch == other.patch)
+        )
+
+    def __lt__(self, other):
+        if self.major > other.major:
+            return False
+        if self.major < other.major:
+            return True
+
+        if self.minor > other.minor:
+            return False
+        if self.minor < other.minor:
+            return True
+
+        return self.patch < other.patch
+
+    def __le__(self, other):
+        return self.__eq__(other) or self.__lt__(other)
+
+    def __gt__(self, other):
+        if self.major < other.major:
+            return False
+        if self.major > other.major:
+            return True
+        if self.minor < other.minor:
+            return False
+        if self.minor > other.minor:
+            return True
+        return self.patch > other.patch
+
+    def __ge__(self, other):
+        return self.__eq__(other) or self.__gt__(other)
+
+
 class Pkg:
     def __init__(self, name: str, path: str):
         self.name = name
@@ -23,11 +93,32 @@ class Pkg:
         self.deb_name = f'ros-{ROS_DISTRO}-{self.dashed_name}'
         self.path = path
         self.local_deps = []
+        self.local_version = Version()
+        self.remote_version = Version()
+
+    def update_version(self):
+        self._update_local_version()
+        self._update_remote_version()
 
     def add_dependency(self, name: str):
         self.local_deps.append(name)
 
-    def get_remote_version_string(self):
+    def _update_remote_version(self):
+        string = self._get_remote_version_string()
+        if string:
+            self.remote_version.set_from_string(string)
+        else:
+            print(
+                f'{self.name} Could not determine remote version. '
+                'Probably the package does not exist yet.'
+            )
+            self.remote_version.set_from_string('0.0.0')
+
+    def _update_local_version(self):
+        string = self._get_local_version_string()
+        self.local_version.set_from_string(string)
+
+    def _get_remote_version_string(self):
         name = self.deb_name
         cmd = f'apt-cache madison {name}'
         output = subprocess.check_output(cmd, shell=True, text=True)
@@ -38,7 +129,7 @@ class Pkg:
         # get versino number before the debian build increment
         return version_string.split('-')[0].replace(' ', '')
 
-    def get_local_version_string(self):
+    def _get_local_version_string(self):
         cmd = f'colcon info {self.name}'
         output = subprocess.check_output(cmd, shell=True, text=True)
         lines = output.splitlines()
@@ -48,36 +139,18 @@ class Pkg:
         return None
 
     def requires_rebuild(self):
-        remote = self.get_remote_version_string()
-        if not remote:
+        s_remote = str(self.remote_version)
+        s_local = str(self.local_version)
+        print(
+            f'{self.name} remote version: {s_remote}, local version:{s_local}'
+        )
+        if self.remote_version >= self.local_version:
             print(
-                'Could not determine remote version. '
-                'Probably the package does not exist yet.'
+                'Version of the package to build is not newer than '
+                'remote version. Skipping.'
             )
-            return True
-        local = self.get_local_version_string()
-        print(f'remote version: {remote}, local version:{local}')
-        if remote == local:
-            print('Local version and remote version are identical. Skipping.')
             return False
-        rmajor, rminor, rpatch = [int(x) for x in remote.split('.')]
-        lmajor, lminor, lpatch = [int(x) for x in local.split('.')]
-        if rmajor > lmajor:
-            print('Local version is older than remote version! Skipping.')
-            return False
-        if rmajor < lmajor:
-            return True
-        if rminor > lminor:
-            print('Local version is older than remote version! Skipping.')
-            return False
-        if rminor < lminor:
-            return True
-        if rpatch > lpatch:
-            print('Local version is older than remote version! Skipping.')
-            return False
-        if rpatch < lpatch:
-            return True
-        raise RuntimeError('Dont know how i got here!')
+        return self.local_version > self.remote_version
 
 
 def get_packages() -> list[Pkg]:
@@ -89,6 +162,15 @@ def get_packages() -> list[Pkg]:
         name, path, _ = line.split('\t')
         path = os.path.join(WORKSPACE_DIR, path)
         pkgs.append(Pkg(name, path))
+    threads = []
+    print('Receiving package versions')
+    for pkg in pkgs:
+        threads.append(threading.Thread(target=pkg.update_version))
+        threads[-1].start()
+
+    for thread in threads:
+        thread.join()
+    print('Done')
 
     cmd = ['colcon', 'graph']
     result = subprocess.run(cmd, text=True, stdout=subprocess.PIPE)
@@ -161,13 +243,13 @@ def install_package(pkg: Pkg):
 
 
 if __name__ == '__main__':
-    pkgs = get_packages()
     # we do this only once. it is required because we are in a docker
     # environment and the sources list is deleted by convention
     print('Updating apt')
     run_apt_update()
     print('Updating rosdep')
     run_rosdep_update()
+    pkgs = get_packages()
     for pkg in pkgs:
         print(f'\nProcessing {pkg.name}')
         if not pkg.requires_rebuild():
