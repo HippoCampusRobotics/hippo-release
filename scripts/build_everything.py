@@ -12,10 +12,13 @@ from collections import namedtuple
 
 import yaml
 
+# from multiprocessing import Process
+
 Pkg = namedtuple('Pkg', ['name', 'path', 'local_deps'])
 ROS_DISTRO = os.environ.get('ROS_DISTRO')
 WORKSPACE_DIR = os.getcwd()
 DEBS = []
+N_PARALLEL_BUILDS = 4
 
 
 class Version:
@@ -95,6 +98,7 @@ class Pkg:
         self.local_deps = []
         self.local_version = Version()
         self.remote_version = Version()
+        self.done = False
 
     def update_version(self):
         self._update_local_version()
@@ -199,23 +203,39 @@ def run_rosdep_update():
 
 def install_dependencies(pkg):
     cmd = f'rosdep install --from-paths {pkg.path} -y'
-    subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT)
+    try:
+        subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError as e:
+        print(f'Command failed: {e.cmd}')
+        print(f'stdout\n-----\n{e.output}')
+        print(f'stderr:\n-----\n{e.stderr}')
+        exit(1)
 
 
 def build_package(pkg: Pkg):
     env = os.environ.copy()
     dir = pkg.path
     cmd = 'bloom-generate rosdebian'
-    shell = True
-    if not shell:
-        cmd = shlex.split(cmd)
-    result = subprocess.Popen(cmd, shell=shell, cwd=dir, env=env)
-    result.wait()
+    try:
+        subprocess.check_output(
+            cmd, shell=True, cwd=dir, env=env, stderr=subprocess.STDOUT
+        )
+    except subprocess.CalledProcessError as e:
+        print(f'Command failed: {e.cmd}')
+        print(f'stdout\n-----\n{e.output}')
+        print(f'stderr:\n-----\n{e.stderr}')
+        exit(1)
     print('Starting build process')
     cmd = 'export DEB_BUILD_OPTIONS="parallel=4";fakeroot debian/rules binary'
-    if not shell:
-        cmd = shlex.split(cmd)
-    subprocess.check_output(cmd, shell=shell, cwd=dir, env=env)
+    try:
+        subprocess.check_output(
+            cmd, shell=True, cwd=dir, env=env, stderr=subprocess.STDOUT
+        )
+    except subprocess.CalledProcessError as e:
+        print(f'Command failed: {e.cmd}')
+        print(f'stdout\n-----\n{e.output}')
+        print(f'stderr:\n-----\n{e.stderr}')
+        exit(1)
     print('Build process done')
 
 
@@ -253,10 +273,12 @@ if __name__ == '__main__':
     for pkg in pkgs:
         print(f'\nProcessing {pkg.name}')
         if not pkg.requires_rebuild():
+            pkg.done = True
             continue
         print('Installing dependencies.')
         install_dependencies(pkg)
         build_package(pkg)
+        pkg.done = True
         print('Installing package')
         install_package(pkg)
         print('Updating rosdep')
