@@ -27,3 +27,11 @@ do
     tmp=$(git checkout --quiet "${latest_tag}")
     cd ..
 done
+
+# Separate handling of px4_msgs since this is not in our
+# organization's repos
+echo "Cloning px4_msgs"
+git clone --quiet https://github.com/PX4/px4_msgs.git
+cd px4_msgs
+git checkout --quiet 8a7f3da
+cd ..
