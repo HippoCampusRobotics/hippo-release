@@ -8,13 +8,11 @@ import shlex
 import shutil
 import subprocess
 import threading
-from collections import namedtuple
+import time
+from multiprocessing import Process
 
 import yaml
 
-# from multiprocessing import Process
-
-Pkg = namedtuple('Pkg', ['name', 'path', 'local_deps'])
 ROS_DISTRO = os.environ.get('ROS_DISTRO')
 WORKSPACE_DIR = os.getcwd()
 DEBS = []
@@ -192,7 +190,7 @@ def get_packages() -> list[Pkg]:
 
 
 def run_apt_update():
-    cmd = 'apt update'
+    cmd = 'apt-get update'
     subprocess.check_output(shlex.split(cmd), stderr=subprocess.STDOUT)
 
 
@@ -225,7 +223,6 @@ def build_package(pkg: Pkg):
         print(f'stdout\n-----\n{e.output}')
         print(f'stderr:\n-----\n{e.stderr}')
         exit(1)
-    print('Starting build process')
     cmd = 'export DEB_BUILD_OPTIONS="parallel=4";fakeroot debian/rules binary'
     try:
         subprocess.check_output(
@@ -236,7 +233,20 @@ def build_package(pkg: Pkg):
         print(f'stdout\n-----\n{e.output}')
         print(f'stderr:\n-----\n{e.stderr}')
         exit(1)
-    print('Build process done')
+
+
+def find_package(name, pkgs: list[Pkg]):
+    pkg = [pkg for pkg in pkgs if pkg.name == name]
+    assert len(pkg) == 1
+    return pkg[0]
+
+
+def all_dependencies_built(pkg: Pkg, pkgs: list[Pkg]):
+    for dep_name in pkg.local_deps:
+        dep_pkg = find_package(dep_name, pkgs)
+        if not dep_pkg.done:
+            return False
+    return True
 
 
 def install_package(pkg: Pkg):
@@ -254,8 +264,8 @@ def install_package(pkg: Pkg):
     names = glob.glob(pattern)
     for name in names:
         print(name)
-    cmd = f'apt install {names[0]}'
-    subprocess.check_output(cmd, shell=True)
+    cmd = f'apt-get install {names[0]}'
+    subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT)
     p = pathlib.Path(names[0])
     out = pathlib.Path(f'/debs/{p.name}')
     shutil.move(str(p), str(out))
@@ -265,21 +275,49 @@ def install_package(pkg: Pkg):
 if __name__ == '__main__':
     # we do this only once. it is required because we are in a docker
     # environment and the sources list is deleted by convention
+    print(ROS_DISTRO)
     print('Updating apt')
     run_apt_update()
     print('Updating rosdep')
     run_rosdep_update()
     pkgs = get_packages()
-    for pkg in pkgs:
-        print(f'\nProcessing {pkg.name}')
-        if not pkg.requires_rebuild():
-            pkg.done = True
-            continue
-        print('Installing dependencies.')
-        install_dependencies(pkg)
-        build_package(pkg)
-        pkg.done = True
-        print('Installing package')
-        install_package(pkg)
-        print('Updating rosdep')
-        run_rosdep_update()
+    processes: dict[str, Process] = {}
+    count_last = -1
+    while not all(pkg.done for pkg in pkgs):
+        time.sleep(1.0)
+        count = sum(pkg.done for pkg in pkgs)
+        if count != count_last:
+            print(f'Progress: {count} of {len(pkgs)} done.')
+            count_last = count
+        for pkg in pkgs:
+            if pkg.done:
+                continue
+            if pkg.name in processes:
+                processes[pkg.name].join(1.0)
+                if (exitcode := processes[pkg.name].exitcode) is not None:
+                    if exitcode != 0:
+                        print(
+                            f'Build process for {pkg.name} returned '
+                            'non-zero exit code: {exitcode}'
+                        )
+                    processes.pop(pkg.name)
+                    print(f'Installing package: {pkg.name}')
+                    install_package(pkg)
+                    print('Updating rosdep')
+                    run_rosdep_update()
+                    pkg.done = True
+            elif (
+                all_dependencies_built(pkg, pkgs)
+                and len(processes) < N_PARALLEL_BUILDS
+            ):
+                if not pkg.requires_rebuild():
+                    pkg.done = True
+                else:
+                    print(f'\nProcessing {pkg.name}')
+                    print('Installing dependencies.')
+                    install_dependencies(pkg)
+                    processes[pkg.name] = Process(
+                        target=build_package, args=(pkg,)
+                    )
+                    print(f'Starting built for {pkg.name}')
+                    processes[pkg.name].start()

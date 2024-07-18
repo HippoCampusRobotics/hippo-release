@@ -1,3 +1,10 @@
 #!/usr/bin/bash
-docker buildx build . -t hippo-release-builder
-docker run --rm -it --ulimit nofile=1024:2048 -v ./debs:/debs hippo-release-builder:latest "$@"
+set -e
+if [[ $1 ]];then
+    echo "Building for ROS_DISTRO=$1"
+else
+    echo "Please specify the ROS distribution as first parameter"
+    exit 1
+fi
+docker buildx build --build-arg "ROS_DISTRO=$1" . -t hippo-release-builder:$1
+docker run --rm -it --ulimit nofile=1024:2048 -v ./debs:/debs hippo-release-builder:$1
