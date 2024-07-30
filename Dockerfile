@@ -18,7 +18,7 @@ RUN apt-get update \
     && curl https://repositories.hippocampus-robotics.net/hippo-archive.key -o /etc/apt/keyrings/hippocampus-robotics.asc \
     && rm /etc/ros/rosdep/sources.list.d/20-default.list \
     && rosdep init \
-    && echo "yaml https://raw.githubusercontent.com/HippoCampusRobotics/hippo_common/main/rosdep-${ROS_DISTRO}.yaml" > /etc/ros/rosdep/sources.list.d/50-hippocampus-packages.list \
+    && echo "yaml https://raw.githubusercontent.com/HippoCampusRobotics/hippo_infrastructure/main/rosdep-${ROS_DISTRO}.yaml" > /etc/ros/rosdep/sources.list.d/50-hippocampus-packages.list \
     && apt-get autoremove -y \
     && apt-get clean -y \
     && rm -rf /var/lib/apt/lists/*
